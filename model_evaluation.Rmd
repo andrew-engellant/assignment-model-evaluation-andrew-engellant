@@ -1,0 +1,117 @@
+---
+title: "Evaluating Models"
+author: "Andrew Engellant"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load libraries
+library(tidymodels)
+# read data
+d <- read.table('training_price_estimates.txt', sep='\t',header = TRUE)
+d2 <- read.table('price_estimates.txt', sep = '\t', header = TRUE)
+# view plots of price vs each model
+pairs(d)
+```
+
+The above plots give an initial insight into the performance of each model. By observing the top row of scatter plots, the predictions from each model can be seen plotted again the actual price. Models 1 and 2 both appear to have several outliers from under-predictions. Model 3 has less obvious outliers, and models 4 and 5 both appear to be tree models. Let's calculate some statistics to better evaluate each model's performance. 
+
+
+
+```{r}
+example.set <- metric_set(rsq, rmse, mae, mape, huber_loss)
+
+
+example.set(d2, truth = price, estimate = model1_est) %>%
+  select(-.estimator) %>%
+  rename(model1 = .estimate) %>%
+  left_join(
+    example.set(d2, truth = price, estimate = model2_est) %>%
+      select(-.estimator) %>%
+      rename(model2 = .estimate),
+    by = ".metric"
+  ) %>%
+  left_join(
+    example.set(d2, truth = price, estimate = model3_est) %>%
+      select(-.estimator) %>%
+      rename(model3 = .estimate),
+    by = ".metric"
+  ) %>%
+  left_join(
+    example.set(d2, truth = price, estimate = model4_est) %>%
+      select(-.estimator) %>%
+      rename(model4 = .estimate),
+    by = ".metric"
+  ) %>%
+  left_join(
+    example.set(d2, truth = price, estimate = model5_est) %>%
+      select(-.estimator) %>%
+      rename(model5 = .estimate),
+    by = ".metric"
+  )
+```
+
+By assessing each model's $R^2$, root mean square error, mean absolute error, and mean absolute percentage error, model 3 appears to do the best job predicting price. Model 3 has a higher $R^2$ and lower RMSE and MAE compared to the other four models. Only model 5 has a lower MAPE than model 3, indicating model 5 might perform better when predicting the price of inexpensive Subarus, however these statistics are comparable in size. Since RMSE squares each residual, a disproportionately greater penalty is assigned to larger residuals. MAE on the other hand does not the square residuals and therefore assigns a more linear and equal penalty to different sizes of residuals. I've included another metric called the Huber Loss. The Huber Loss uses a mixture of these two approaches, weighing only smaller residuals as their square. This results in a metric that is more robust to outliers since it assigns more weight to smaller residuals. Model 3 again has the smallest Huber Loss. 
+
+The performance of model 2 falls shortly behind that of model 3. Model 2 has the second lowest $R^2$, RMSE, MAE, and Huber Loss model, and the third lowest MAPE because of model 5. 
+
+Ultimately, Models 3 appears to do the best job predicting the price of Subarus. Model 2 does the second best job. If the user cared mostly about the model's ability to accurately predict the price of less expensive cars, model 5 should be considered. 
+
+Let's take a closer look at models 2 and 3 to assess where their weaknesses are.  
+
+
+```{r}
+# Add residuals to d
+d2$m3_residuals <- d2$model3_est - d2$price
+d2$m2_residuals <- d2$model2_est - d2$price
+
+table(d2$model)
+
+d3 <- d2 %>%
+  filter(model %in% c('forester','outback','legacy','impreza'))
+  
+# plot residuals
+ggplot(d2, aes(x = price, y = m3_residuals)) +
+  geom_point() +
+  labs(x = "Price", y = "Residuals", title = "Model 3 Residuals vs Price")
+
+ggplot(d3, aes(x = odometer, y = m3_residuals, col = model)) +
+  geom_point() +
+  labs(x = "Mileage", y = "Residuals", title = "Model 3 Residuals vs Mileage by Car Model")
+
+ggplot(d3, aes(x = year, y = m3_residuals, col = model)) +
+  geom_point() +
+  labs(x = "Year", y = "Residuals", title = "Model 3 Residuals vs Year by Car Model")
+```
+
+The first graph above compares Model 3's prediction residuals to the actual price of each Subaru. The model overall does a good job as most of the points are banded around 0. The overall downward trend indicates that the model generally tends to over-predicts the price of less expensive cars and under-predicts the price of more expensive cars. There are also a few unusual outliers. The model under-predicted the price of a \$50,000 car by \$30,000, and the model over-predicted a car that was was listed for close to \$0 by \$10,000. The first outlier has the potential to significantly impact RMSE, and the second outlier could have a large impact on MAPE. 
+
+The second two graphs compare Model 3's residuals to the Mileage and Year variables using a filtered dataset that only includes the top four car models (Forester, Impreza, Legacy and Outback). These two graphs also distinguish between car models using color. Generally, Model 3 does a good job predicting the price of car with zero miles and greater than 100,000 miles. For cars greater than 0 and less than 100,000 miles, this model has much greater variation in prediction residuals. For these low mileage cars, the model tends to underestimate the price of Outbacks and Foresters, and over-predict the price of Legacies. 
+
+When it comes to Year, This model does a fine job predicting the price of cars older than 2000. For 2000 to 2012 cars, this model also does a decent job, although it under-predicted the price of several Outback and Legacy cars by more than $5,000. This model struggles the most with newer cars. For cars newer than 2012, this model has much higher variation in prediction residuals, and consistently under-predicts the price of cars from 2016 and 2017.
+
+Let's look at where Model 2's weaknesses lie.
+
+```{r}
+# plot residuals for Model 2
+ggplot(d2, aes(x = price, y = m2_residuals)) +
+  geom_point() +
+  labs(x = "Price", y = "Residuals", title = "Model 2 Residuals vs Price")
+
+ggplot(d3, aes(x = odometer, y = m2_residuals, col = model)) +
+  geom_point() +
+  labs(x = "Mileage", y = "Residuals", title = "Model 2 Residuals vs Mileage by Car Model")
+
+ggplot(d3, aes(x = year, y = m2_residuals, col = model)) +
+  geom_point() +
+  labs(x = "Year", y = "Residuals", title = "Model 2 Residuals vs Year by Car Model")
+```
+
+Model 2 follows a similar trend as model 3, generally over-predicting less expensive cars and under-predicting more expensive cars, although this trend is less apparent with this model. Model two appears to have the same extreme outliers that were found in model 3. The main difference between these two models occurs in the mid-priced Subarus ($10,000-30,000). Model 2 had similar performance to model 3, although its predictions for mid-priced cars seem to have higher variance than model 3. This slight decrease in performance when predicting mid-priced cars likely accounts for most of the differences observed in the metrics calculated above.
+
+I've included the same two graphs comparing Mileage, Year and Car Model for Model 2 as used above. Similar to Model 3, Model 2 does a better job predicting the price of cars with higher mileage. This model struggles more with cars with less than 150,000, and has a strong tendency to under-predict the price of Foresters and Outbacks with less than 100,000 miles. Model 2 also has greater variation in prediction residuals than Model 3 for cars with 0 miles. Model 2 has a similar trend as Model 3, overall doing a better job predicting price as the age of a car increases. Model 2 had a few significant residuals for 2002 and 2003 Outbacks, under-predicting a few of these cars by more than $7,500. 
